@@ -23,14 +23,11 @@ from os import cpu_count
 import os, re
 from bs4 import BeautifulSoup
 
-
-
-
 browser = None
 url = "https://www.apeseg.org.pe/consultas-soat/"
 columnsData = ['Compañia','Inicio','Fin','Placa','Certificado','Uso','Clase','Estado','Tipo','Fec.Creación','Datatime_Extraction']
 
-outputFileResults = 'ResultadosScrapping_SOAT.tsv'
+outputFileResults = 'ResultadosScrapping_SOAT_Replicado.tsv'
 
 with open(outputFileResults,'w', encoding='utf-8') as f:
     file_writer = csv.writer(f, delimiter='\t', lineterminator='\n')
@@ -83,7 +80,6 @@ def writeRows(html_source):
 
     ts = time.time()
 
-
     for row in tbody.findAll("tr"):
         columns = row.findAll("td")
         columnsText = []
@@ -99,17 +95,11 @@ def writeRows(html_source):
             file_writer.writerow(columnsText)
 
 
-
-
-
-
-
-
-def scrapingOneDocument(browser,placa):
+def scrapingOneDocument(browser,placa,rootDirectory):
 
     browser.get(url)
     delay = 10  # seconds
-    delay2 = 2.5
+    delay2 = 2
 
     try:
         myElem = WebDriverWait(browser, delay).until(EC.presence_of_element_located((By.CLASS_NAME, 'Placa')))
@@ -119,7 +109,7 @@ def scrapingOneDocument(browser,placa):
 
     captchaElement = browser.find_element_by_xpath("//img[@alt='captcha']")
 
-    fileNameCaptcha = 'captcha_soat_' + placa + '.png'
+    fileNameCaptcha = rootDirectory + '/captcha_soat_' + placa + '.png'
 
     getCaptchaImage(captchaElement, fileNameCaptcha)
     fileNameCaptcha = preprocessImage(fileNameCaptcha)
@@ -129,8 +119,6 @@ def scrapingOneDocument(browser,placa):
 
 
     if len(stringInCaptcha) == 4:
-
-        sleep(5)
 
         # 4. Getting form
         num_placa = browser.find_element_by_xpath("//input[@class='Placa'][@name='textfield']")
@@ -144,7 +132,8 @@ def scrapingOneDocument(browser,placa):
         cmdConsultar = browser.find_element_by_id("SOATForm")
         cmdConsultar.click()
 
-        sleep(3)
+        while (not (len(browser.window_handles) == 2)):
+            print("Hay 1 ventana aún")
 
         print(browser.window_handles)
         new_window = browser.window_handles[1]
@@ -167,9 +156,17 @@ def scrapingOneDocument(browser,placa):
         print("Tiene una cantidad de letras diferente a 4")
         return False
 
+def createResultsDirectory():
+    directories = set(os.listdir())
+    rootDirectory = 'Resultados'
+
+    if rootDirectory not in directories:
+        if not os.path.exists(rootDirectory):
+            os.makedirs(rootDirectory)
+    return rootDirectory
 
 
-def downloader(placa):
+def downloader(placa,rootDirectory):
     print(placa)
     options = Options()
     options.add_argument("--headless")
@@ -181,16 +178,36 @@ def downloader(placa):
     #browser = webdriver.Firefox()
     browser.set_page_load_timeout(30)
 
-    scrapingOneDocument(browser, placa)
+    isDownloaded = scrapingOneDocument(browser, placa,rootDirectory)
 
     browser.quit()
 
+    return isDownloaded
+
 def main():
-    placas = ['B5F445','D5J548','AKQ683','C4D167','B2J433','ABS604','C5Y099']
+    placas = ['B5F445','D5J548','AKQ683','C4D167','B2J433','ABS604','C5Y099']*2
     #placas = ['B5F445', 'D5J548']
 
+    numDownloaded = 0
+    rootDirectory = createResultsDirectory()
+
+    '''
     for placa in placas:
-        downloader(placa)
+        isDownloaded = downloader(placa)
+        if isDownloaded:
+            numDownloaded += 1
+
+    print(numDownloaded)
+    '''
+
+
+    with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+        futures = [executor.submit(downloader, placa, rootDirectory) for placa in placas]
+        #for future in as_completed(futures):
+        #    print(future.result())
+        #    if future.result():
+        #        numDownloaded += 1
+    #print("Total: " + str(len(placas)) + " - Descargados: " + str(numDownloaded))
 
 
 def getCaptchas():
@@ -223,7 +240,6 @@ def getCaptchas():
         img = cv2.imread(fileNameCaptcha, 0)
         crop_img = img[5:5 + 22, 0:0 + 50]
         cv2.imwrite(fileNameCaptcha, crop_img)
-
 
 try:
     t0 = time.time()
